@@ -1,5 +1,5 @@
 import streamlit as st
-import openai
+from openai import OpenAI
 import os
 from dotenv import load_dotenv
 import PyPDF2
@@ -26,24 +26,44 @@ def extract_text_from_pdf(pdf_file):
         return ""
 
 
-
-
-def create_context_message(context_text, role=""):
+def create_context_message(context_text, tone=""):
     """Tạo thông điệp hệ thống với context.
     Đầu vào là văn bản context và vai trò, đầu ra là chuỗi thông điệp hệ thống"""
-    return
+    base_prompt = "Bạn là một trợ lý AI thông minh và thân thiện."
+    if tone:
+        base_prompt += f" Hãy trả lời với tong giọng {tone}."
+    if context_text:
+        base_prompt += f"Tham khảo những thông tin sau khi trả lời:\n\n{context_text}\n\nHãy sử dụng thông tin này để trả lời câu hỏi của người dùng một cách chính xác và chi tiết."
+    return base_prompt
 
 
 def initialize_openai():
     """Khởi tạo client OpenAI với khóa API.
     Đầu ra là client OpenAI đã khởi tạo"""
-    return
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        st.error(...)
+        st.stop()
+        
+    client = OpenAI(api_key=api_key)
+    return client
 
 
 def get_chatgpt_response(messages, client=None):
     """Lấy phản hồi từ API ChatGPT.
     Đầu vào là danh sách tin nhắn, đầu ra là phản hồi từ ChatGPT"""
-    return
+    
+    try:
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=messages,
+            max_tokens=150,
+            temperature=0.7
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        st.error(f"Không thể lấy phản hồi từ ChatGPT: {e}")
+        return
 
 
 def main():
@@ -76,6 +96,16 @@ def main():
     # Khởi tạo trạng thái phiên cho lịch sử cuộc trò chuyện
     # Dùng st.session_state để lưu trữ trạng thái cuộc trò chuyện
     ##### CODE SNIPPET START #####
+    if "messages" not in st.session_state:
+        st.session_state.messages = [
+            { "role": "system", "content": "Bạn là một trợ lý AI thông minh và thân thiện." }
+        ]
+    
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+        
+    if "system_message" not in st.session_state:
+        st.session_state.system_message = "Bạn là một trợ lý AI thông minh và thân thiện."
 
     # Khởi tạo sidebar với st.sidebar
     ##### CODE SNIPPET START #####
@@ -88,7 +118,7 @@ def main():
         # Chọn tone giọng AI
         # Tạo dropdown menu với st.selectbox
         tone_options = ["Trung tính", "Thân thiện", "Chuyên nghiệp", "Hài hước"]
-        select_tone = st.selectbox(
+        selected_tone = st.selectbox(
             "Chọn tone giọng AI",
             options=tone_options,
             key="tone_select",
@@ -147,7 +177,18 @@ def main():
 
 
         # Cập nhật thông điệp cho hệ thống nếu context thay đổi
-        
+        if full_context:
+            system_message = create_context_message(full_context, selected_tone)
+            if (
+                "system_message" not in st.session_state
+                or st.session_state.system_message != system_message
+            ):
+                st.session_state.system_message = system_message
+                st.session_state.messages = [
+                    {"role": "system", "content": system_message}
+                ]
+                st.session_state.chat_history = []
+                st.success("Đã cập nhật context cho AI!")
         
 
         # Tạo nút xóa cuộc trò chuyện và giữ nguyên thông điệp hệ thống
@@ -164,15 +205,38 @@ def main():
                 )
         
         # Hiện thị tone giọng hiện tại nếu có
-        if select_tone:
-            st.info(f"Tone giọng hiện tại: {select_tone}")
+        if selected_tone:
+            st.info(f"Tone giọng hiện tại: {selected_tone}")
 
         st.markdown("---")
         st.markdown("🎭 Made by [KhanhLe](https://kelvin-lee098.github.io)")
 
     # Hiển thị lịch sử trò chuyện trong st.session_state.chat_history với st.markdown
+    for i, (user_msg, ai_msg) in enumerate(st.session_state.chat_history):
+        if user_msg:
+            st.markdown(f"**Bạn:** {user_msg}")
+        if ai_msg:
+            st.markdown(f"**AI:** {ai_msg}")
 
     # Đầu vào câu hỏi từ người dùng với st.chat_input
+    user_input = st.chat_input("💬 Nhập câu hỏi của bạn tại đây...", key="user_input")
+    
+    if user_input:
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        
+        with st.spinner("Đang xử lý..."):
+            response = get_chatgpt_response(
+                st.session_state.messages,
+                client=openai_client
+            )
+        
+        # Lưu phản hồi vào lịch sử cuộc trò chuyện
+        if response:
+            st.session_state.messages.append({"role": "assistant", "content": response})
+            st.session_state.chat_history.append((user_input, response))
+            st.markdown(f"**AI:** {response}")   
+        
+        st.rerun()
 
 
 if __name__ == "__main__":
